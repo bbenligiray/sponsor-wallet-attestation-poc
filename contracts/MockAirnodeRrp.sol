@@ -9,13 +9,13 @@ contract MockAirnodeRrp {
     function fulfill(
         bytes32 requestId,
         address airnode,
-        // bytes calldata data,
+        bytes calldata data,
         // address fulfillAddress,
         // bytes4 fulfillFunctionId,
         bytes calldata signature
     ) external {
         require(
-            (requestId.toEthSignedMessageHash()).recover(signature) == airnode,
+            (keccak256(abi.encodePacked(requestId, data)).toEthSignedMessageHash()).recover(signature) == airnode,
             "Invalid signature"
         );
         // Continue as usual...
@@ -23,8 +23,8 @@ contract MockAirnodeRrp {
 
     function fulfillBare(
         bytes32 requestId,
-        address airnode
-        // bytes calldata data,
+        address airnode,
+        bytes calldata data
         // address fulfillAddress,
         // bytes4 fulfillFunctionId
     ) external {
