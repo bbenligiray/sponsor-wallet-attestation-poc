@@ -8,47 +8,61 @@ function generateRandomAirnodeWallet() {
   return { airnodeAddress: airnodeWallet.address, airnodeMnemonic: airnodeWallet.mnemonic.phrase, airnodeXpub };
 }
 
-function generateRandomBytes32() {
-  return ethers.utils.hexlify(ethers.utils.randomBytes(32));
-};
-
 function generateRandomAddress() {
   return ethers.utils.getAddress(ethers.utils.hexlify(ethers.utils.randomBytes(20)));
 }
 
 describe("MockAirnodeRrp", function () {
   it("does not revert only with the correct signature", async function () {
+    const accounts = await hre.ethers.getSigners();
+    const sponsorWallet = accounts[1];
+    const randomPerson = accounts[2];
+
     const MockAirnodeRrp = await ethers.getContractFactory("MockAirnodeRrp");
     const airnodeRrp = await MockAirnodeRrp.deploy();
 
     const { airnodeAddress, airnodeMnemonic } = generateRandomAirnodeWallet();
-    const requestId = generateRandomBytes32();
 
     // Derving the wallet with the explicit path just because
     const airnodeWallet = hre.ethers.Wallet.fromMnemonic(airnodeMnemonic, "m/44'/60'/0'/0/0");
     // Uses EIP-191
     // https://eips.ethereum.org/EIPS/eip-191
-    const signature = await airnodeWallet.signMessage(ethers.utils.arrayify(requestId));
+    const signature = await airnodeWallet.signMessage(ethers.utils.arrayify(ethers.utils.defaultAbiCoder.encode(['address'], [sponsorWallet.address])));
 
     // Does not revert if the signature matches airnode and requestId
     await expect(
-      airnodeRrp.fulfill(requestId, airnodeAddress, signature)
+      airnodeRrp.connect(sponsorWallet).fulfill(airnodeAddress, signature)
     ).to.not.be.reverted;
 
-    // Reverts otherwise
+    // This next call will be a ~5000 gas cheaper because it doesn't need to confirm the signature
     await expect(
-      airnodeRrp.fulfill(generateRandomBytes32(), airnodeAddress, signature)
-    ).to.be.reverted;
+      airnodeRrp.connect(sponsorWallet).fulfill(airnodeAddress, signature)
+    ).to.not.be.reverted;
+
+    // Does not revert if the signature was confirmed before even if the signature is not correct
     await expect(
-      airnodeRrp.fulfill(requestId, generateRandomAddress(), signature)
-    ).to.be.reverted;
+      airnodeRrp.connect(sponsorWallet).fulfill(airnodeAddress, "0x123456")
+    ).to.not.be.reverted;
+
+    // The sponsor wallet is allowed to update the associated Airnode address with another signature
+    const { airnodeAddress: anotherAirnodeAddress, airnodeMnemonic: anotherAirnodeMnemonic } = generateRandomAirnodeWallet();
+    const anotherAirnodeWallet = hre.ethers.Wallet.fromMnemonic(anotherAirnodeMnemonic, "m/44'/60'/0'/0/0");
     await expect(
-      airnodeRrp.fulfill(requestId, airnodeAddress, await airnodeWallet.signMessage(ethers.utils.arrayify(generateRandomBytes32())))
+      airnodeRrp.connect(sponsorWallet).fulfill(anotherAirnodeAddress, await anotherAirnodeWallet.signMessage(ethers.utils.arrayify(ethers.utils.defaultAbiCoder.encode(['address'], [sponsorWallet.address]))))
+    ).to.not.be.reverted;
+    // But then it will no longer be able to fulfill requests for the initial Airnode with an invalid signature
+    await expect(
+      airnodeRrp.connect(sponsorWallet).fulfill(airnodeAddress, "0x123456")
     ).to.be.reverted;
 
-    // Also do this for the gas test
+    // Others can't use the signature to fulfill the request themselves
     await expect(
-      airnodeRrp.fulfillBare(requestId, airnodeAddress)
+      airnodeRrp.connect(randomPerson).fulfill(airnodeAddress, signature)
+    ).to.be.reverted;
+
+    // This is to create a reference for the gas costs
+    await expect(
+      airnodeRrp.fulfillBare(airnodeAddress)
     ).to.not.be.reverted;
   });
 });
