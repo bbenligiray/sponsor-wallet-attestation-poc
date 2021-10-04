@@ -1,54 +1,40 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-function generateRandomAirnodeWallet() {
-  const airnodeWallet = ethers.Wallet.createRandom();
-  const airnodeHdNode = ethers.utils.HDNode.fromMnemonic(airnodeWallet.mnemonic.phrase);
-  const airnodeXpub = airnodeHdNode.neuter().extendedKey;
-  return { airnodeAddress: airnodeWallet.address, airnodeMnemonic: airnodeWallet.mnemonic.phrase, airnodeXpub };
-}
-
-function generateRandomBytes32() {
-  return ethers.utils.hexlify(ethers.utils.randomBytes(32));
-};
-
-function generateRandomAddress() {
-  return ethers.utils.getAddress(ethers.utils.hexlify(ethers.utils.randomBytes(20)));
-}
-
 describe("MockAirnodeRrp", function () {
-  it("does not revert only with the correct signature", async function () {
+  it("works", async function () {
+    const accounts = await hre.ethers.getSigners();
+    const airnodeWallet = accounts[1];
     const MockAirnodeRrp = await ethers.getContractFactory("MockAirnodeRrp");
-    const airnodeRrp = await MockAirnodeRrp.deploy();
+    const mockAirnodeRrp = await MockAirnodeRrp.deploy();
 
-    const { airnodeAddress, airnodeMnemonic } = generateRandomAirnodeWallet();
-    const requestId = generateRandomBytes32();
+    const domain = {
+      name: 'Airnode',
+      version: '1'
+    };
 
-    // Derving the wallet with the explicit path just because
-    const airnodeWallet = hre.ethers.Wallet.fromMnemonic(airnodeMnemonic, "m/44'/60'/0'/0/0");
-    // Uses EIP-191
-    // https://eips.ethereum.org/EIPS/eip-191
-    const signature = await airnodeWallet.signMessage(ethers.utils.arrayify(requestId));
+    const types = {
+      Response: [
+        {name: 'requestId', type: 'bytes32'},
+        {name: 'data', type: 'bytes'}
+      ]
+    };
 
-    // Does not revert if the signature matches airnode and requestId
-    await expect(
-      airnodeRrp.fulfill(requestId, airnodeAddress, signature)
-    ).to.not.be.reverted;
+    const requestId = '0x1234567890123456789012345678901234567890123456789012345678901234';
+    const data = '0x12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678';
+    const value = {
+      requestId: requestId,
+      data: data
+    };
+    
+    // If you want to do the same locally
+    // const domainSeparatorHashedType = ethers.utils.keccak256(ethers.utils.toUtf8Bytes('EIP712Domain(string name,string version)'));
+    // const domainSeparator = ethers.utils.keccak256(ethers.utils.defaultAbiCoder.encode(['bytes32', 'bytes32', 'bytes32'], [domainSeparatorHashedType, ethers.utils.keccak256(ethers.utils.toUtf8Bytes(domain.name)), ethers.utils.keccak256(ethers.utils.toUtf8Bytes(domain.version))]));
 
-    // Reverts otherwise
-    await expect(
-      airnodeRrp.fulfill(generateRandomBytes32(), airnodeAddress, signature)
-    ).to.be.reverted;
-    await expect(
-      airnodeRrp.fulfill(requestId, generateRandomAddress(), signature)
-    ).to.be.reverted;
-    await expect(
-      airnodeRrp.fulfill(requestId, airnodeAddress, await airnodeWallet.signMessage(ethers.utils.arrayify(generateRandomBytes32())))
-    ).to.be.reverted;
+    // const structHashHashedType = ethers.utils.keccak256(ethers.utils.toUtf8Bytes('Response(bytes32 requestId,bytes data)'));
+    // const structHash = ethers.utils.keccak256(ethers.utils.defaultAbiCoder.encode(['bytes32', 'bytes32', 'bytes32'], [structHashHashedType, requestId, ethers.utils.keccak256(ethers.utils.arrayify(data))]));
 
-    // Also do this for the gas test
-    await expect(
-      airnodeRrp.fulfillBare(requestId, airnodeAddress)
-    ).to.not.be.reverted;
+    const signature = await airnodeWallet._signTypedData(domain, types, value);
+    await mockAirnodeRrp.fulfill(requestId, airnodeWallet.address, data, signature);
   });
 });
